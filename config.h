@@ -50,7 +50,7 @@ static const int refreshrate = 120;  /* refresh rate (per second) for client mov
 
 static const Layout layouts[] = {
 	/* symbol     arrange function */
-	{ "[]=",      tile },    /* first entry is default - like XMonad "tall" */
+	{ "=[]",      tile },    /* first entry is default - master right, stack left */
 	{ "[M]",      monocle }, /* like XMonad "monocle" (Full) */
 	{ "HHH",      grid },   /* like XMonad "grid" */
 	{ "|||",      tcl },    /* like XMonad "threeColMid" (three column) */
@@ -131,8 +131,8 @@ static const Key keys[] = {
 	{ MODKEY,                       XK_m,      togglefullscr,  {0} },
 
 	/* --- Layout switching --- */
-	/* mod+Space: Cycle layout algorithms */
-	{ MODKEY,                       XK_space,  setlayout,      {0} },
+	/* mod+Space: Cycle forward through layout algorithms */
+	{ MODKEY,                       XK_space,  cyclelayout,    {.i = +1} },
 	/* mod+Shift+Space: Reset layout to default (toggle floating) */
 	{ MODKEY|ShiftMask,             XK_space,  togglefloating, {0} },
 

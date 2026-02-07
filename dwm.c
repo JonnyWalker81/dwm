@@ -153,6 +153,7 @@ static void buttonpress(XEvent *e);
 static void checkotherwm(void);
 static void cleanup(void);
 static void cleanupmon(Monitor *mon);
+static void cyclelayout(const Arg *arg);
 static void clientmessage(XEvent *e);
 static void configure(Client *c);
 static void configurenotify(XEvent *e);
@@ -521,6 +522,29 @@ cleanupmon(Monitor *mon)
 	XUnmapWindow(dpy, mon->barwin);
 	XDestroyWindow(dpy, mon->barwin);
 	free(mon);
+}
+
+void
+cyclelayout(const Arg *arg)
+{
+	unsigned int i;
+	const Layout *l;
+
+	/* find the index of the current layout */
+	for (i = 0; i < LENGTH(layouts); i++)
+		if (&layouts[i] == selmon->lt[selmon->sellt])
+			break;
+
+	/* advance by arg->i (typically +1 or -1), wrapping around */
+	i = (i + LENGTH(layouts) + arg->i) % LENGTH(layouts);
+	l = &layouts[i];
+
+	selmon->lt[selmon->sellt] = l;
+	strncpy(selmon->ltsymbol, l->symbol, sizeof selmon->ltsymbol);
+	if (selmon->sel)
+		arrange(selmon);
+	else
+		drawbar(selmon);
 }
 
 void
@@ -1946,8 +1970,8 @@ tagmon(const Arg *arg)
 void
 tcl(Monitor *m)
 {
-	int x, y, h, w, mw, sw, bdw, g;
-	unsigned int i, n;
+	int x, y, h, mw, sw, bdw, g;
+	unsigned int i, n, nleft, nright;
 	Client *c;
 
 	g = m->gappx;
@@ -1956,52 +1980,69 @@ tcl(Monitor *m)
 		return;
 
 	c = nexttiled(m->clients);
-	mw = m->mfact * m->ww;
-	sw = (m->ww - mw) / 2;
 	bdw = (2 * c->bw);
 
-	resize(c,
-	       n < 3 ? m->wx + g : m->wx + sw + g,
-	       m->wy + g,
-	       (n == 1 ? m->ww - bdw - 2*g : mw - bdw - 2*g),
-	       m->wh - bdw - 2*g,
-	       False);
-
-	if (--n == 0)
+	/* 1 window: full screen; 2 windows: master + one side column;
+	 * 3+ windows: left stack | master | right stack */
+	if (n == 1) {
+		resize(c, m->wx + g, m->wy + g,
+		       m->ww - bdw - 2*g, m->wh - bdw - 2*g, False);
 		return;
+	}
 
-	w = (m->ww - mw) / ((n > 1) + 1);
+	if (n == 2) {
+		/* master on left, single stack window on right */
+		mw = m->mfact * (m->ww - 3*g);
+		resize(c, m->wx + g, m->wy + g,
+		       mw - bdw, m->wh - bdw - 2*g, False);
+		c = nexttiled(c->next);
+		resize(c, m->wx + g + mw + g, m->wy + g,
+		       m->ww - mw - 3*g - bdw, m->wh - bdw - 2*g, False);
+		return;
+	}
+
+	/* 3+ windows: three column layout */
+	/* Available width = ww - 4*g (outer gap left, gap left|master, gap master|right, outer gap right) */
+	mw = m->mfact * (m->ww - 4*g);
+	sw = (m->ww - 4*g - mw) / 2;
+
+	/* Distribute stack windows: left gets (n-1+1)/2, right gets (n-1)/2 */
+	nleft = (n - 1 + 1) / 2;  /* ceiling half of stack windows */
+	nright = (n - 1) / 2;     /* floor half of stack windows */
+
+	/* Master in center */
+	resize(c, m->wx + sw + 2*g, m->wy + g,
+	       mw - bdw, m->wh - bdw - 2*g, False);
+
 	c = nexttiled(c->next);
 
-	if (n > 1) {
-		x = m->wx + mw + sw + g;
+	/* Right column */
+	if (nright > 0) {
+		x = m->wx + sw + mw + 3*g;
 		y = m->wy + g;
-		h = (m->wh - 2*g - (n/2 - 1)*g) / (n / 2);
-
+		h = (m->wh - 2*g - (nright - 1)*g) / nright;
 		if (h < bh)
 			h = m->wh;
 
-		for (i = 0; c && i < n / 2; c = nexttiled(c->next), i++) {
-			resize(c, x, y,
-			       w - bdw - 2*g,
-			       (i + 1 == n / 2) ? m->wy + m->wh - y - bdw - g : h - bdw,
+		for (i = 0; c && i < nright; c = nexttiled(c->next), i++) {
+			resize(c, x, y, sw - bdw,
+			       (i + 1 == nright) ? m->wy + m->wh - y - bdw - g : h - bdw,
 			       False);
 			if (h != m->wh)
 				y = c->y + HEIGHT(c) + g;
 		}
 	}
 
+	/* Left column */
 	x = m->wx + g;
 	y = m->wy + g;
-	h = (m->wh - 2*g - ((n+1)/2 - 1)*g) / ((n + 1) / 2);
-
+	h = (m->wh - 2*g - (nleft - 1)*g) / nleft;
 	if (h < bh)
 		h = m->wh;
 
 	for (i = 0; c; c = nexttiled(c->next), i++) {
-		resize(c, x, y,
-		       w - bdw - 2*g,
-		       (i + 1 == (n + 1) / 2) ? m->wy + m->wh - y - bdw - g : h - bdw,
+		resize(c, x, y, sw - bdw,
+		       (i + 1 == nleft) ? m->wy + m->wh - y - bdw - g : h - bdw,
 		       False);
 		if (h != m->wh)
 			y = c->y + HEIGHT(c) + g;
@@ -2011,7 +2052,7 @@ tcl(Monitor *m)
 void
 tile(Monitor *m)
 {
-	unsigned int i, n, h, mw, my, ty, g;
+	unsigned int i, n, h, mw, sw, my, ty, g;
 	Client *c;
 
 	g = m->gappx;
@@ -2023,18 +2064,21 @@ tile(Monitor *m)
 		mw = m->nmaster ? (m->ww - g) * m->mfact : 0;
 	else
 		mw = m->ww - 2*g;
+	sw = m->ww - mw - 2*g - (n > m->nmaster && m->nmaster ? g/2 : 0);
 	for (i = my = ty = 0, c = nexttiled(m->clients); c; c = nexttiled(c->next), i++)
 		if (i < m->nmaster) {
+			/* master on the right */
 			h = (m->wh - my - 2*g) / (MIN(n, m->nmaster) - i);
-			resize(c, m->wx + g, m->wy + my + g,
+			resize(c, m->wx + m->ww - mw - g + (n > m->nmaster ? g/2 : 0), m->wy + my + g,
 			       mw - (2*c->bw) - (n > m->nmaster ? g/2 : 0),
 			       h - (2*c->bw) - (i + 1 < MIN(n, m->nmaster) ? g : 0), 0);
 			if (my + HEIGHT(c) + g < m->wh)
 				my += HEIGHT(c) + g;
 		} else {
+			/* stack on the left */
 			h = (m->wh - ty - 2*g) / (n - i);
-			resize(c, m->wx + mw + g + (m->nmaster ? g/2 : 0), m->wy + ty + g,
-			       m->ww - mw - (2*c->bw) - 2*g - (m->nmaster ? g/2 : 0),
+			resize(c, m->wx + g, m->wy + ty + g,
+			       sw - (2*c->bw),
 			       h - (2*c->bw) - (i + 1 < n ? g : 0), 0);
 			if (ty + HEIGHT(c) + g < m->wh)
 				ty += HEIGHT(c) + g;

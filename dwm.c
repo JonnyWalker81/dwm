@@ -29,6 +29,7 @@
 #include <string.h>
 #include <unistd.h>
 #include <sys/types.h>
+#include <sys/stat.h>
 #include <sys/wait.h>
 #include <X11/cursorfont.h>
 #include <X11/keysym.h>
@@ -118,6 +119,7 @@ struct Monitor {
 	int by;               /* bar geometry */
 	int mx, my, mw, mh;   /* screen size */
 	int wx, wy, ww, wh;   /* window area  */
+	int gappx;            /* gap pixel size */
 	unsigned int seltags;
 	unsigned int sellt;
 	unsigned int tagset[2];
@@ -166,8 +168,10 @@ static void enternotify(XEvent *e);
 static void expose(XEvent *e);
 static void focus(Client *c);
 static void focusin(XEvent *e);
+static void focusmaster(const Arg *arg);
 static void focusmon(const Arg *arg);
 static void focusstack(const Arg *arg);
+static void grid(Monitor *m);
 static Atom getatomprop(Client *c, Atom prop);
 static int getrootptr(int *x, int *y);
 static long getstate(Window w);
@@ -193,6 +197,7 @@ static void resizeclient(Client *c, int x, int y, int w, int h);
 static void resizemouse(const Arg *arg);
 static void restack(Monitor *m);
 static void run(void);
+static void runautostart(void);
 static void scan(void);
 static int sendevent(Client *c, Atom proto);
 static void sendmon(Client *c, Monitor *m);
@@ -207,9 +212,12 @@ static void showhide(Client *c);
 static void spawn(const Arg *arg);
 static void tag(const Arg *arg);
 static void tagmon(const Arg *arg);
+static void tcl(Monitor *m);
 static void tile(Monitor *m);
 static void togglebar(const Arg *arg);
 static void togglefloating(const Arg *arg);
+static void togglefullscr(const Arg *arg);
+static void togglegaps(const Arg *arg);
 static void toggletag(const Arg *arg);
 static void toggleview(const Arg *arg);
 static void unfocus(Client *c, int setfocus);
@@ -234,7 +242,11 @@ static int xerrorstart(Display *dpy, XErrorEvent *ee);
 static void zoom(const Arg *arg);
 
 /* variables */
+static const char autostartblocksh[] = "autostart_blocking.sh";
+static const char autostartsh[] = "autostart.sh";
 static const char broken[] = "broken";
+static const char dwmdir[] = "dwm";
+static const char localshare[] = ".local/share";
 static char stext[256];
 static int screen;
 static int sw, sh;           /* X display screen geometry width, height */
@@ -640,6 +652,7 @@ createmon(void)
 	m->nmaster = nmaster;
 	m->showbar = showbar;
 	m->topbar = topbar;
+	m->gappx = gappx;
 	m->lt[0] = &layouts[0];
 	m->lt[1] = &layouts[1 % LENGTH(layouts)];
 	strncpy(m->ltsymbol, layouts[0].symbol, sizeof m->ltsymbol);
@@ -818,6 +831,32 @@ focusin(XEvent *e)
 
 	if (selmon->sel && ev->window != selmon->sel->win)
 		setfocus(selmon->sel);
+}
+
+void
+focusmaster(const Arg *arg)
+{
+	Client *master;
+
+	if (!selmon->sel || (selmon->sel->isfullscreen && lockfullscreen))
+		return;
+
+	master = nexttiled(selmon->clients);
+
+	if (!master)
+		return;
+
+	if (selmon->sel == master) {
+		/* if already on master, focus next tiled */
+		Client *c;
+		for (c = nexttiled(master->next); c; c = nexttiled(c->next))
+			break;
+		if (c)
+			focus(c);
+	} else {
+		focus(master);
+	}
+	restack(selmon);
 }
 
 void
@@ -1391,6 +1430,83 @@ run(void)
 }
 
 void
+runautostart(void)
+{
+	char *pathpfx;
+	char *path;
+	char *xdgdatahome;
+	char *home;
+	struct stat sb;
+
+	if ((home = getenv("HOME")) == NULL)
+		/* this is almost impossible */
+		return;
+
+	/* if $XDG_DATA_HOME is set and not empty, use $XDG_DATA_HOME/dwm,
+	 * otherwise use ~/.local/share/dwm as autostart script directory
+	 */
+	xdgdatahome = getenv("XDG_DATA_HOME");
+	if (xdgdatahome != NULL && *xdgdatahome != '\0') {
+		/* space for path segments, separators and nul */
+		pathpfx = ecalloc(1, strlen(xdgdatahome) + strlen(dwmdir) + 2);
+
+		if (sprintf(pathpfx, "%s/%s", xdgdatahome, dwmdir) <= 0) {
+			free(pathpfx);
+			return;
+		}
+	} else {
+		/* space for path segments, separators and nul */
+		pathpfx = ecalloc(1, strlen(home) + strlen(localshare)
+		                     + strlen(dwmdir) + 3);
+
+		if (sprintf(pathpfx, "%s/%s/%s", home, localshare, dwmdir) < 0) {
+			free(pathpfx);
+			return;
+		}
+	}
+
+	/* check if the autostart script directory exists */
+	if (! (stat(pathpfx, &sb) == 0 && S_ISDIR(sb.st_mode))) {
+		/* the XDG conformant path does not exist or is no directory
+		 * so we try ~/.dwm instead
+		 */
+		char *pathpfx_new = realloc(pathpfx, strlen(home) + strlen(dwmdir) + 3);
+		if(pathpfx_new == NULL) {
+			free(pathpfx);
+			return;
+		}
+		pathpfx = pathpfx_new;
+
+		if (sprintf(pathpfx, "%s/.%s", home, dwmdir) <= 0) {
+			free(pathpfx);
+			return;
+		}
+	}
+
+	/* try the blocking script first */
+	path = ecalloc(1, strlen(pathpfx) + strlen(autostartblocksh) + 2);
+	if (sprintf(path, "%s/%s", pathpfx, autostartblocksh) <= 0) {
+		free(path);
+		free(pathpfx);
+	}
+
+	if (access(path, X_OK) == 0)
+		system(path);
+
+	/* now the non-blocking script */
+	if (sprintf(path, "%s/%s", pathpfx, autostartsh) <= 0) {
+		free(path);
+		free(pathpfx);
+	}
+
+	if (access(path, X_OK) == 0)
+		system(strcat(path, " &"));
+
+	free(pathpfx);
+	free(path);
+}
+
+void
 scan(void)
 {
 	unsigned int i, num;
@@ -1685,31 +1801,131 @@ tagmon(const Arg *arg)
 }
 
 void
-tile(Monitor *m)
+tcl(Monitor *m)
 {
-	unsigned int i, n, h, mw, my, ty;
+	int x, y, h, w, mw, sw, bdw, g;
+	unsigned int i, n;
 	Client *c;
 
+	g = m->gappx;
+	for (n = 0, c = nexttiled(m->clients); c; c = nexttiled(c->next), n++);
+	if (n == 0)
+		return;
+
+	c = nexttiled(m->clients);
+	mw = m->mfact * m->ww;
+	sw = (m->ww - mw) / 2;
+	bdw = (2 * c->bw);
+
+	resize(c,
+	       n < 3 ? m->wx + g : m->wx + sw + g,
+	       m->wy + g,
+	       (n == 1 ? m->ww - bdw - 2*g : mw - bdw - 2*g),
+	       m->wh - bdw - 2*g,
+	       False);
+
+	if (--n == 0)
+		return;
+
+	w = (m->ww - mw) / ((n > 1) + 1);
+	c = nexttiled(c->next);
+
+	if (n > 1) {
+		x = m->wx + mw + sw + g;
+		y = m->wy + g;
+		h = (m->wh - 2*g - (n/2 - 1)*g) / (n / 2);
+
+		if (h < bh)
+			h = m->wh;
+
+		for (i = 0; c && i < n / 2; c = nexttiled(c->next), i++) {
+			resize(c, x, y,
+			       w - bdw - 2*g,
+			       (i + 1 == n / 2) ? m->wy + m->wh - y - bdw - g : h - bdw,
+			       False);
+			if (h != m->wh)
+				y = c->y + HEIGHT(c) + g;
+		}
+	}
+
+	x = m->wx + g;
+	y = m->wy + g;
+	h = (m->wh - 2*g - ((n+1)/2 - 1)*g) / ((n + 1) / 2);
+
+	if (h < bh)
+		h = m->wh;
+
+	for (i = 0; c; c = nexttiled(c->next), i++) {
+		resize(c, x, y,
+		       w - bdw - 2*g,
+		       (i + 1 == (n + 1) / 2) ? m->wy + m->wh - y - bdw - g : h - bdw,
+		       False);
+		if (h != m->wh)
+			y = c->y + HEIGHT(c) + g;
+	}
+}
+
+void
+tile(Monitor *m)
+{
+	unsigned int i, n, h, mw, my, ty, g;
+	Client *c;
+
+	g = m->gappx;
 	for (n = 0, c = nexttiled(m->clients); c; c = nexttiled(c->next), n++);
 	if (n == 0)
 		return;
 
 	if (n > m->nmaster)
-		mw = m->nmaster ? m->ww * m->mfact : 0;
+		mw = m->nmaster ? (m->ww - g) * m->mfact : 0;
 	else
-		mw = m->ww;
+		mw = m->ww - 2*g;
 	for (i = my = ty = 0, c = nexttiled(m->clients); c; c = nexttiled(c->next), i++)
 		if (i < m->nmaster) {
-			h = (m->wh - my) / (MIN(n, m->nmaster) - i);
-			resize(c, m->wx, m->wy + my, mw - (2*c->bw), h - (2*c->bw), 0);
-			if (my + HEIGHT(c) < m->wh)
-				my += HEIGHT(c);
+			h = (m->wh - my - 2*g) / (MIN(n, m->nmaster) - i);
+			resize(c, m->wx + g, m->wy + my + g,
+			       mw - (2*c->bw) - (n > m->nmaster ? g/2 : 0),
+			       h - (2*c->bw) - (i + 1 < MIN(n, m->nmaster) ? g : 0), 0);
+			if (my + HEIGHT(c) + g < m->wh)
+				my += HEIGHT(c) + g;
 		} else {
-			h = (m->wh - ty) / (n - i);
-			resize(c, m->wx + mw, m->wy + ty, m->ww - mw - (2*c->bw), h - (2*c->bw), 0);
-			if (ty + HEIGHT(c) < m->wh)
-				ty += HEIGHT(c);
+			h = (m->wh - ty - 2*g) / (n - i);
+			resize(c, m->wx + mw + g + (m->nmaster ? g/2 : 0), m->wy + ty + g,
+			       m->ww - mw - (2*c->bw) - 2*g - (m->nmaster ? g/2 : 0),
+			       h - (2*c->bw) - (i + 1 < n ? g : 0), 0);
+			if (ty + HEIGHT(c) + g < m->wh)
+				ty += HEIGHT(c) + g;
 		}
+}
+
+void
+grid(Monitor *m)
+{
+	unsigned int i, n, cx, cy, cw, ch, aw, ah, cols, rows, g;
+	Client *c;
+
+	g = m->gappx;
+	for (n = 0, c = nexttiled(m->clients); c; c = nexttiled(c->next), n++);
+	if (n == 0)
+		return;
+
+	/* grid dimensions */
+	for (rows = 0; rows <= n/2; rows++)
+		if (rows*rows >= n)
+			break;
+	cols = (rows && (rows - 1) * rows >= n) ? rows - 1 : rows;
+
+	/* window geoms (cell height/width) */
+	ch = (m->wh - 2*g - (rows - 1)*g) / (rows ? rows : 1);
+	cw = (m->ww - 2*g - (cols - 1)*g) / (cols ? cols : 1);
+	for (i = 0, c = nexttiled(m->clients); c; c = nexttiled(c->next), i++) {
+		cx = m->wx + g + (i / rows) * (cw + g);
+		cy = m->wy + g + (i % rows) * (ch + g);
+		/* adjust height/width of last row/column's windows */
+		ah = ((i + 1) % rows == 0) ? m->wy + m->wh - g - cy - ch : 0;
+		aw = (i >= rows * (cols - 1)) ? m->wx + m->ww - g - cx - cw : 0;
+		resize(c, cx, cy, cw - 2 * c->bw + aw, ch - 2 * c->bw + ah, False);
+	}
 }
 
 void
@@ -1732,6 +1948,20 @@ togglefloating(const Arg *arg)
 	if (selmon->sel->isfloating)
 		resize(selmon->sel, selmon->sel->x, selmon->sel->y,
 			selmon->sel->w, selmon->sel->h, 0);
+	arrange(selmon);
+}
+
+void
+togglefullscr(const Arg *arg)
+{
+	if (selmon->sel)
+		setfullscreen(selmon->sel, !selmon->sel->isfullscreen);
+}
+
+void
+togglegaps(const Arg *arg)
+{
+	selmon->gappx = selmon->gappx ? 0 : gappx;
 	arrange(selmon);
 }
 
@@ -2158,6 +2388,7 @@ main(int argc, char *argv[])
 		die("pledge");
 #endif /* __OpenBSD__ */
 	scan();
+	runautostart();
 	run();
 	cleanup();
 	XCloseDisplay(dpy);

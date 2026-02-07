@@ -1,33 +1,129 @@
 # DWM XMonad Parity - Project State
 
-## Branch
-`xmonad-parity` in `~/Repositories/dwm` (based on upstream DWM 6.8)
+## Repository
 
-## What Was Done
+- **GitHub**: https://github.com/JonnyWalker81/dwm
+- **Local clone**: `~/Repositories/dwm`
+- **Branch**: `xmonad-parity` (based on upstream DWM 6.8)
+- **Upstream remote**: `upstream` -> `https://git.suckless.org/dwm`
+- **Current commit**: `b65fcbadf1eb3b8e97a9bf37225f08594ec07af0`
 
-### Source Modifications to `dwm.c`
+## Current Status: Integrated into NixOS
+
+DWM is fully integrated into the NixOS configuration and selectable as a login session in SDDM alongside XMonad, AwesomeWM, and Hyprland. The build succeeded and a `nixos-rebuild switch` will make it available.
+
+**What works:**
+- DWM compiles via NixOS overlay from the GitHub repo
+- SDDM shows "dwm" as a selectable session at login
+- All keybindings match XMonad config
+- All layouts (tile, monocle, grid, three-column, floating) are functional
+- Autostart script launches wallpaper, greenclip, emacs daemon, picom, status bar
+- Status bar replicates xmobar info (weather, CPU, memory, disk, uptime, date/time)
+
+**Not yet tested at runtime:**
+- Actually logging into DWM session via SDDM (build verified, not yet switched)
+- Status bar visual appearance (may need tuning)
+- Picom compositing behavior under DWM vs XMonad
+- Font Awesome icons in DWM bar (DWM bar is simpler than xmobar)
+
+## NixOS Integration Architecture
+
+```
+flake.nix
+  overlays (applied globally to all system configs)
+    └── overlays/dwm.nix         # Overrides nixpkgs dwm with our patched build
+
+machines/vm-shared.nix (line 233)
+  └── services.xserver.windowManager.dwm.enable = true;
+      # Creates SDDM session entry "dwm" (none+dwm.desktop)
+
+users/cipher/home-manager.nix    # Deploys autostart + statusbar scripts
+users/jrothberg/home-manager.nix # Same for jrothberg user
+
+users/dwm/autostart.sh           # Source for ~/.local/share/dwm/autostart.sh
+users/dwm/dwm-statusbar.sh       # Source for ~/.local/share/dwm/dwm-statusbar.sh
+```
+
+### NixOS Overlay (`~/nixos-config/overlays/dwm.nix`)
+
+Overrides the nixpkgs `dwm` package with our GitHub source. The NixOS `windowManager.dwm` module uses whatever `pkgs.dwm` resolves to, so the overlay is the only integration point needed.
+
+```nix
+final: prev: {
+  dwm = prev.dwm.overrideAttrs (old: {
+    src = prev.fetchFromGitHub {
+      owner = "JonnyWalker81";
+      repo = "dwm";
+      rev = "b65fcbadf1eb3b8e97a9bf37225f08594ec07af0";  # UPDATE after pushing changes
+      sha256 = "sha256-ykUoxP4+LFi83ceGEChEKgUzlLf8D+q6EZfs/XrH1xo=";  # UPDATE after pushing changes
+    };
+    nativeBuildInputs = (old.nativeBuildInputs or [ ]) ++ [ prev.pkg-config ];
+    buildInputs = (old.buildInputs or [ ]) ++ [
+      prev.xorg.libX11 prev.xorg.libXft prev.xorg.libXinerama
+      prev.freetype prev.fontconfig
+    ];
+  });
+}
+```
+
+### Home-Manager Deployment (both `cipher` and `jrothberg`)
+
+```nix
+home.file.".local/share/dwm/autostart.sh" = {
+  source = ../dwm/autostart.sh;
+  executable = true;
+};
+home.file.".local/share/dwm/dwm-statusbar.sh" = {
+  source = ../dwm/dwm-statusbar.sh;
+  executable = true;
+};
+```
+
+## Workflow: Updating DWM After Source Changes
+
+1. Make changes in `~/Repositories/dwm` (edit `dwm.c`, `config.h`, etc.)
+2. Build locally to verify: `nix-shell -p xorg.libX11.dev xorg.libXft.dev xorg.libXinerama.dev pkg-config freetype.dev fontconfig.dev gnumake gcc xorg.xorgproto --run "make clean && make"`
+3. Commit and push:
+   ```bash
+   cd ~/Repositories/dwm
+   git add -A && git commit -m "description"
+   git push origin xmonad-parity
+   ```
+4. Get the new commit hash and source hash:
+   ```bash
+   REV=$(git rev-parse HEAD)
+   nix-prefetch-url --unpack "https://github.com/JonnyWalker81/dwm/archive/${REV}.tar.gz"
+   # Convert the output hash to SRI format:
+   nix hash convert --to sri --hash-algo sha256 <hash-from-above>
+   ```
+5. Update `~/nixos-config/overlays/dwm.nix` with new `rev` and `sha256`
+6. Rebuild NixOS:
+   ```bash
+   cd ~/nixos-config
+   sudo nixos-rebuild switch --flake ".#vm-aarch64-prl"
+   ```
+
+## Source Modifications to `dwm.c`
+
 - Added `gappx` field to `Monitor` struct for per-monitor gap tracking
-- Added `focusmaster()` function — focuses the master window (mod+v), toggles back if already on master
-- Added `togglefullscr()` function — actual fullscreen toggle (mod+m)
-- Added `togglegaps()` function — toggle gaps on/off (mod+Shift+g)
+- Added `focusmaster()` function -- focuses the master window (mod+v), toggles back if already on master
+- Added `togglefullscr()` function -- actual fullscreen toggle (mod+m)
+- Added `togglegaps()` function -- toggle gaps on/off (mod+Shift+g)
 - Rewrote `tile()` layout to be gap-aware (respects `m->gappx` for inner/outer gaps)
-- Added `grid()` layout function — gap-aware grid layout
-- Added `tcl()` layout function — gap-aware three-column-layout (master centered)
-- Applied `autostart` patch (from suckless.org) — runs `~/.local/share/dwm/autostart.sh` on startup
+- Added `grid()` layout function -- gap-aware grid layout
+- Added `tcl()` layout function -- gap-aware three-column-layout (master centered)
+- Applied `autostart` patch (from suckless.org) -- runs `~/.local/share/dwm/autostart.sh` on startup
 - All new functions have proper forward declarations
 
-### New Files Created
-- `movestack.c` — swap focused window with next/prev in stack (mod+Shift+j/k), included via `#include` in config.h
-- `tcl.c` — downloaded from suckless.org (unused, implementation moved inline to dwm.c)
-- `config.h` — full configuration matching XMonad (see details below)
-- `movestack.c` — movestack patch implementation
-- `.gitignore` — ignores `*.o`, `dwm` binary, `*.tar.gz`
-- `patches/` directory — contains downloaded patch files for reference
-- `~/.local/share/dwm/autostart.sh` — startup script (feh wallpaper, greenclip, emacs --daemon, picom)
+### Other Modified/New Files
 
-### `config.mk` Changes
-- Replaced hardcoded `/usr/X11R6/` paths with `pkg-config` for NixOS compatibility
-- Build requires nix-shell: `nix-shell -p xorg.libX11.dev xorg.libXft.dev xorg.libXinerama.dev pkg-config freetype.dev fontconfig.dev gnumake gcc xorg.xorgproto --run "make"`
+- `config.h` -- Full XMonad-matching config (see tables below)
+- `config.mk` -- Replaced hardcoded `/usr/X11R6/` paths with `pkg-config` for NixOS compatibility
+- `movestack.c` -- Swap focused window with next/prev in stack, included via `#include` in config.h
+- `tcl.c` -- Downloaded from suckless.org (unused, implementation moved inline to dwm.c)
+- `dwm.1` -- Modified by autostart patch
+- `.gitignore` -- Ignores `*.o`, `dwm` binary, `*.tar.gz`
+- `patches/` -- Downloaded reference patch files
 
 ## config.h Settings (Matching XMonad)
 
@@ -54,7 +150,7 @@
 | Selected Border | `#B4F9F8` | `myFocusedBorderColor` |
 
 ### Tags (Workspaces)
-`"coding", "web", "services", "work", "misc", "6", "7", "8", "9"` — matches `myWorkspaces`
+`"coding", "web", "services", "work", "misc", "6", "7", "8", "9"` -- matches `myWorkspaces`
 
 ### Window Rules
 | Class | Float | XMonad Source |
@@ -110,63 +206,83 @@
 | `mod+button2` | togglefloating | `windows W.shiftMaster` (raise) |
 | `mod+button3` | resizemouse (float+resize) | `mouseResizeWindow` |
 
-## Git Status
-- Branch: `xmonad-parity`
-- Modified: `config.mk`, `dwm.1`, `dwm.c`
-- New untracked: `config.h`, `movestack.c`, `tcl.c`, `patches/`, `.gitignore`
-- Build artifacts (ignored): `*.o`, `dwm` binary
-- **Nothing committed yet** — all changes are uncommitted
+## Status Bar (`dwm-statusbar.sh`)
 
-## Build Status
-- Compiles successfully with only 2 benign warnings (unused `system()` return in autostart patch)
-- Binary: `~/Repositories/dwm/dwm` (82K)
+DWM reads status from `xsetroot -name`. The status bar script runs in a loop (2s interval) and replicates xmobar's right-side info:
 
-## Next Steps: Add DWM as a Login Session
-To make DWM selectable at login (SDDM), you need to:
+```
+  72F, Sunny  |  cpu: 5%  |  mem: 42%  |  hdd: 15G free  |  uptime: 3d 7h  |  Feb 06 2026 - 14:30 (22:30 UTC)
+```
 
-1. **Add DWM to NixOS configuration** — either:
-   - Use `services.xserver.windowManager.dwm.enable = true;` with a custom package overlay pointing to `~/Repositories/dwm`
-   - Or create a custom `.desktop` session file for the display manager
+**Sections (matching xmobar):**
+| Section | Source | xmobar Equivalent |
+|---|---|---|
+| Weather | `wttr.in/91105` (cached 10min) | `Run Com "scripts/wttr.sh"` |
+| CPU | `/proc/stat` delta | `Run Cpu` |
+| Memory | `free -m` | `Run Memory` |
+| Disk | `df -h /` | `Run DiskU` |
+| Uptime | `/proc/uptime` | `Run Uptime` |
+| Date/Time | `date` local + UTC | `Run Com "xmobar-datetime.sh"` |
 
-2. **NixOS overlay approach** (recommended):
-   ```nix
-   # In flake.nix or overlays/
-   dwm = prev.dwm.overrideAttrs (old: {
-     src = /home/cipher/Repositories/dwm;
-   });
-   ```
-   Then enable in `machines/vm-shared.nix`:
-   ```nix
-   services.xserver.windowManager.dwm.enable = true;
-   ```
+**Managed by**: `~/nixos-config/users/dwm/dwm-statusbar.sh` -> deployed to `~/.local/share/dwm/dwm-statusbar.sh` via home-manager.
 
-3. **Status bar**: DWM reads status from `xsetroot -name`. You'll need a status bar script or use `dwmblocks`/`slstatus` to replicate xmobar functionality. Alternatively, you can run xmobar separately and pipe to `xsetroot`.
+## Autostart Script (`autostart.sh`)
 
-4. **Rebuild NixOS**: `sudo nixos-rebuild switch --flake ".#<config-name>"`
+Called by DWM's autostart patch on startup. Mirrors XMonad's `myStartupHook`:
+
+| Process | Purpose | XMonad Equivalent |
+|---|---|---|
+| `feh --bg-fill` | Set wallpaper | `spawnOnce "feh --bg-fill ..."` |
+| `greenclip daemon` | Clipboard manager | `spawnOnce "greenclip daemon"` |
+| `emacs --daemon` | Emacs server | `spawnOnce "emacs --daemon"` |
+| `picom --daemon` | Compositor | picom systemd service |
+| `dwm-statusbar.sh` | Status bar loop | xmobar spawned in main |
+
+**Managed by**: `~/nixos-config/users/dwm/autostart.sh` -> deployed to `~/.local/share/dwm/autostart.sh` via home-manager.
 
 ## Files Reference
-```
-~/Repositories/dwm/
-├── .git/
-├── .gitignore          (new)
-├── config.def.h        (original, untouched)
-├── config.h            (new - XMonad-matching config)
-├── config.mk           (modified - pkg-config for NixOS)
-├── drw.c               (original)
-├── drw.h               (original)
-├── dwm.1               (modified by autostart patch)
-├── dwm.c               (modified - gaps, focusmaster, togglefullscr, togglegaps, grid, tcl layouts)
-├── dwm.png             (original)
-├── LICENSE              (original)
-├── Makefile             (original)
-├── movestack.c         (new - movestack patch)
-├── patches/            (new - downloaded reference patches)
-├── README              (original)
-├── tcl.c               (new - downloaded reference, implementation is inline in dwm.c)
-├── transient.c         (original)
-├── util.c              (original)
-└── util.h              (original)
 
-~/.local/share/dwm/
-└── autostart.sh        (new - startup script: feh, greenclip, emacs, picom)
+### DWM Repository (`~/Repositories/dwm/`)
 ```
+.git/
+.gitignore          (ignores *.o, dwm binary, *.tar.gz)
+config.def.h        (original upstream, untouched)
+config.h            (XMonad-matching config)
+config.mk           (modified: pkg-config for NixOS)
+drw.c               (original)
+drw.h               (original)
+dwm.1               (modified by autostart patch)
+dwm.c               (modified: gaps, focusmaster, togglefullscr, togglegaps, grid, tcl)
+dwm.png             (original)
+DWM-XMONAD-PARITY.md (this file)
+LICENSE             (original)
+Makefile            (original)
+movestack.c         (movestack patch)
+patches/            (downloaded reference patch files)
+README              (original)
+tcl.c               (downloaded reference, implementation is inline in dwm.c)
+transient.c         (original)
+util.c              (original)
+util.h              (original)
+```
+
+### NixOS Config (`~/nixos-config/`) -- DWM-related files
+```
+overlays/dwm.nix                     # Overlay: builds DWM from GitHub source
+machines/vm-shared.nix                # Line 233: windowManager.dwm.enable = true
+users/dwm/autostart.sh               # Source: DWM autostart script
+users/dwm/dwm-statusbar.sh           # Source: DWM status bar script
+users/cipher/home-manager.nix         # Deploys dwm/ files to ~/.local/share/dwm/
+users/jrothberg/home-manager.nix      # Same for jrothberg user
+```
+
+## Potential Future Work
+
+- **Runtime testing**: Log into DWM session, verify everything works end-to-end
+- **Status bar polish**: Consider `dwmblocks` or `slstatus` for click-to-expand, colored segments, etc. The current `xsetroot` approach is plain text only (no colors in DWM's built-in bar without the `status2d` patch)
+- **Status2d patch**: Would allow colored status bar segments similar to xmobar's colored boxes
+- **Systray patch**: Add system tray to DWM bar (xmobar has `trayer` integration)
+- **Per-tag layouts**: DWM uses a single layout list cycled via mod+Space; XMonad remembers layout per-workspace
+- **XMonad layouts not yet ported**: `threeRow`, `oneBig`, `space` (XMonad has 9 layouts vs DWM's 5)
+- **Picom exclusion rules**: XMonad's picom config excludes xmobar from blur/shadows; DWM bar may need similar rules added to `~/.config/picom/picom.conf` or `users/common.nix`
+- **Restart-in-place**: DWM doesn't have XMonad's `mod+q` recompile-and-restart; consider adding a `SIGHUP` handler or the `restart` patch

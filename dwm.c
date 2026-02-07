@@ -247,7 +247,7 @@ static const char autostartsh[] = "autostart.sh";
 static const char broken[] = "broken";
 static const char dwmdir[] = "dwm";
 static const char localshare[] = ".local/share";
-static char stext[256];
+static char stext[512];
 static int screen;
 static int sw, sh;           /* X display screen geometry width, height */
 static int bh;               /* bar height */
@@ -707,6 +707,144 @@ dirtomon(int dir)
 	return m;
 }
 
+/* Status2d: check if text contains color escape sequences */
+static int
+status2d_hasescapes(const char *text)
+{
+	const char *p = text;
+	while (*p) {
+		if (*p == '^' && ((p[1] == 'c' && p[2] == '#') ||
+		                  (p[1] == 'b' && p[2] == '#') ||
+		                  (p[1] == 'd' && p[2] == '^')))
+			return 1;
+		p++;
+	}
+	return 0;
+}
+
+/* Status2d: get visible text width excluding ^c#RRGGBB^, ^b#RRGGBB^, ^d^ escape sequences */
+static unsigned int
+status2dtextwidth(const char *text)
+{
+	char buf[512];
+	int bi = 0;
+	const char *p = text;
+
+	while (*p) {
+		if (*p == '^') {
+			if (p[1] == 'c' && p[2] == '#' && p[9] == '^') {
+				p += 10; /* skip ^c#RRGGBB^ */
+				continue;
+			} else if (p[1] == 'b' && p[2] == '#' && p[9] == '^') {
+				p += 10; /* skip ^b#RRGGBB^ */
+				continue;
+			} else if (p[1] == 'd' && p[2] == '^') {
+				p += 3; /* skip ^d^ */
+				continue;
+			}
+		}
+		if (bi < (int)sizeof(buf) - 1)
+			buf[bi++] = *p;
+		p++;
+	}
+	buf[bi] = '\0';
+	return drw_fontset_getwidth(drw, buf);
+}
+
+/* Status2d: draw status text with inline color escape sequences
+ * Supports: ^c#RRGGBB^ (foreground), ^b#RRGGBB^ (background), ^d^ (reset)
+ * Draws directly using Xft to avoid drw_text's background fill per-segment */
+static void
+drawstatus2d(int x, unsigned int totalw)
+{
+	char buf[512];
+	int bi = 0;
+	const char *p = stext;
+	int tx = x;
+	XftDraw *d;
+	Fnt *usedfont = drw->fonts;
+	int ty = (bh - usedfont->h) / 2 + usedfont->xfont->ascent;
+	XftColor curfg = scheme[SchemeNorm][ColFg];
+	XftColor curbg = scheme[SchemeNorm][ColBg];
+
+	/* Fill entire status area with normal background */
+	drw_setscheme(drw, scheme[SchemeNorm]);
+	XSetForeground(drw->dpy, drw->gc, scheme[SchemeNorm][ColBg].pixel);
+	XFillRectangle(drw->dpy, drw->drawable, drw->gc, x, 0, totalw, bh);
+
+	d = XftDrawCreate(drw->dpy, drw->drawable,
+	                  DefaultVisual(drw->dpy, drw->screen),
+	                  DefaultColormap(drw->dpy, drw->screen));
+
+	while (*p) {
+		if (*p == '^') {
+			if (p[1] == 'c' && p[2] == '#' && p[9] == '^') {
+				/* Flush current buffer with current colors */
+				if (bi > 0) {
+					buf[bi] = '\0';
+					unsigned int tw;
+					drw_font_getexts(usedfont, buf, bi, &tw, NULL);
+					XftDrawStringUtf8(d, &curfg, usedfont->xfont, tx, ty,
+					                  (XftChar8 *)buf, bi);
+					tx += tw;
+					bi = 0;
+				}
+				/* Parse foreground color ^c#RRGGBB^ */
+				char clr[8];
+				strncpy(clr, p + 2, 7);
+				clr[7] = '\0';
+				drw_clr_create(drw, &curfg, clr);
+				p += 10;
+				continue;
+			} else if (p[1] == 'b' && p[2] == '#' && p[9] == '^') {
+				/* Flush and apply background */
+				if (bi > 0) {
+					buf[bi] = '\0';
+					unsigned int tw;
+					drw_font_getexts(usedfont, buf, bi, &tw, NULL);
+					XftDrawStringUtf8(d, &curfg, usedfont->xfont, tx, ty,
+					                  (XftChar8 *)buf, bi);
+					tx += tw;
+					bi = 0;
+				}
+				char clr[8];
+				strncpy(clr, p + 2, 7);
+				clr[7] = '\0';
+				drw_clr_create(drw, &curbg, clr);
+				p += 10;
+				continue;
+			} else if (p[1] == 'd' && p[2] == '^') {
+				/* Flush and reset to defaults */
+				if (bi > 0) {
+					buf[bi] = '\0';
+					unsigned int tw;
+					drw_font_getexts(usedfont, buf, bi, &tw, NULL);
+					XftDrawStringUtf8(d, &curfg, usedfont->xfont, tx, ty,
+					                  (XftChar8 *)buf, bi);
+					tx += tw;
+					bi = 0;
+				}
+				curfg = scheme[SchemeNorm][ColFg];
+				curbg = scheme[SchemeNorm][ColBg];
+				p += 3;
+				continue;
+			}
+		}
+		if (bi < (int)sizeof(buf) - 1)
+			buf[bi++] = *p;
+		p++;
+	}
+	/* Flush remaining text */
+	if (bi > 0) {
+		buf[bi] = '\0';
+		XftDrawStringUtf8(d, &curfg, usedfont->xfont, tx, ty,
+		                  (XftChar8 *)buf, bi);
+	}
+	XftDrawDestroy(d);
+	/* Restore default scheme */
+	drw_setscheme(drw, scheme[SchemeNorm]);
+}
+
 void
 drawbar(Monitor *m)
 {
@@ -722,8 +860,13 @@ drawbar(Monitor *m)
 	/* draw status first so it can be overdrawn by tags later */
 	if (m == selmon) { /* status is only drawn on selected monitor */
 		drw_setscheme(drw, scheme[SchemeNorm]);
-		tw = TEXTW(stext) - lrpad + 2; /* 2px right padding */
-		drw_text(drw, m->ww - tw, 0, tw, bh, 0, stext, 0);
+		if (status2d_hasescapes(stext)) {
+			tw = status2dtextwidth(stext) + 2; /* 2px right padding */
+			drawstatus2d(m->ww - tw, tw);
+		} else {
+			tw = TEXTW(stext) - lrpad + 2; /* 2px right padding */
+			drw_text(drw, m->ww - tw, 0, tw, bh, 0, stext, 0);
+		}
 	}
 
 	for (c = m->clients; c; c = c->next) {

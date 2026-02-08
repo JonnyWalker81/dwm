@@ -13,12 +13,11 @@ static const int vertpad            = 4;        /* vertical padding (gap between
 static const int barpadding         = 10;       /* internal bar height padding (added to font height) */
 
 /* fonts: primary UI font + Nerd Font for icons */
-static const char *fonts[]          = { "Ubuntu:weight=bold:pixelsize=13:antialias=true:hinting=true",
-                                        "JetBrainsMono Nerd Font:pixelsize=15:antialias=true:hinting=true",
+static const char *fonts[]          = { "JetBrainsMono Nerd Font:weight=bold:pixelsize=13:antialias=true:hinting=true",
                                         "Mononoki Nerd Font:weight=bold:pixelsize=13:antialias=true:hinting=true",
                                         "Font Awesome 5 Free Solid:pixelsize=13:antialias=true:hinting=true",
                                         "Font Awesome 5 Brands:pixelsize=13:antialias=true:hinting=true" };
-static const char dmenufont[]       = "Ubuntu:weight=bold:pixelsize=13:antialias=true:hinting=true";
+static const char dmenufont[]       = "JetBrainsMono Nerd Font:weight=bold:pixelsize=13:antialias=true:hinting=true";
 
 /* --- Tokyo Night / Omarchy color palette --- */
 static const char black[]          = "#1a1b26";  /* deep background */

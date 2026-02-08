@@ -6,28 +6,56 @@ static const unsigned int snap      = 32;       /* snap pixel */
 static const int gappx              = 8;        /* gap pixel between windows (XMonad: myWindowSpacing = 8) */
 static const int showbar            = 1;        /* 0 means no bar */
 static const int topbar             = 1;        /* 0 means bottom bar */
+
+/* chadwm-style bar padding: creates a floating bar effect */
+static const int horizpad           = 8;        /* horizontal padding (gap between bar and screen edges) */
+static const int vertpad            = 8;        /* vertical padding (gap between bar and top of screen) */
+static const int barpadding         = 10;       /* internal bar height padding (added to font height) */
+
+/* fonts: primary UI font + Nerd Font for icons */
 static const char *fonts[]          = { "Ubuntu:weight=bold:pixelsize=13:antialias=true:hinting=true",
+                                        "JetBrainsMono Nerd Font:pixelsize=15:antialias=true:hinting=true",
                                         "Mononoki:weight=bold:pixelsize=13:antialias=true:hinting=true",
                                         "Font Awesome 6 Free Solid:pixelsize=13:antialias=true:hinting=true",
                                         "Font Awesome 6 Brands:pixelsize=13:antialias=true:hinting=true" };
 static const char dmenufont[]       = "Ubuntu:weight=bold:pixelsize=13:antialias=true:hinting=true";
 
-/* Omarchy / Nord color scheme matching XMonad config */
-static const char col_normbg[]      = "#24283B"; /* normal background - Omarchy code background */
-static const char col_normfg[]      = "#a9b1d6"; /* normal foreground - Omarchy soft blue-gray */
-static const char col_normborder[]  = "#24283B"; /* unfocused border - myNormalBorderColor */
-static const char col_selbg[]       = "#2E3440"; /* selected background - Nord dark */
-static const char col_selfg[]       = "#B4F9F8"; /* selected foreground - Omarchy bright cyan */
-static const char col_selborder[]   = "#B4F9F8"; /* focused border - myFocusedBorderColor */
+/* --- Tokyo Night / Omarchy color palette --- */
+static const char black[]          = "#1a1b26";  /* deep background */
+static const char gray1[]          = "#24283B";  /* normal background - Omarchy code background */
+static const char gray2[]          = "#2E3440";  /* selected background - Nord dark */
+static const char gray3[]          = "#3e4554";  /* dimmed foreground for inactive tags */
+static const char white[]          = "#a9b1d6";  /* normal foreground - Omarchy soft blue-gray */
+static const char cyan[]           = "#B4F9F8";  /* focused border / selected foreground - Omarchy bright cyan */
+static const char blue[]           = "#7aa2f7";  /* tag color 1 - Tokyo Night blue */
+static const char red[]            = "#f7768e";  /* tag color 2 - Tokyo Night red */
+static const char orange[]         = "#ff9e64";  /* tag color 3 - Tokyo Night orange */
+static const char green[]          = "#9ece6a";  /* tag color 4 - Tokyo Night green */
+static const char pink[]           = "#bb9af7";  /* tag color 5 - Tokyo Night purple/pink */
+static const char yellow[]         = "#e0af68";  /* layout symbol color */
 
-static const char *colors[][3]      = {
-	/*               fg            bg            border   */
-	[SchemeNorm] = { col_normfg,   col_normbg,   col_normborder },
-	[SchemeSel]  = { col_selfg,    col_selbg,    col_selborder  },
+/* backward compat aliases for dmenu command */
+static const char col_normbg[]     = "#24283B";
+static const char col_normfg[]     = "#a9b1d6";
+static const char col_selbg[]      = "#2E3440";
+static const char col_selfg[]      = "#B4F9F8";
+
+static const char *colors[][3]     = {
+	/*                    fg       bg       border   */
+	[SchemeNorm]    = { white,   gray1,   gray1  },  /* normal: soft gray on dark bg */
+	[SchemeSel]     = { cyan,    gray2,   cyan   },  /* selected: bright cyan border */
+	[SchemeTitle]   = { cyan,    gray1,   gray1  },  /* window title: cyan text */
+	[SchemeTag]     = { gray3,   gray1,   gray1  },  /* inactive/occupied tags: dimmed */
+	[SchemeTag1]    = { blue,    gray1,   gray1  },  /* tag 1: blue */
+	[SchemeTag2]    = { red,     gray1,   gray1  },  /* tag 2: red */
+	[SchemeTag3]    = { orange,  gray1,   gray1  },  /* tag 3: orange */
+	[SchemeTag4]    = { green,   gray1,   gray1  },  /* tag 4: green */
+	[SchemeTag5]    = { pink,    gray1,   gray1  },  /* tag 5: pink */
+	[SchemeLayout]  = { yellow,  gray1,   gray1  },  /* layout symbol: yellow */
 };
 
-/* tagging - matching XMonad workspaces */
-static const char *tags[] = { "coding", "web", "services", "work", "misc", "6", "7", "8", "9" };
+/* tagging - matching XMonad workspaces with Nerd Font icons */
+static const char *tags[] = { " ", " ", " ", " ", " ", "6", "7", "8", "9" };
 
 static const Rule rules[] = {
 	/* xprop(1):

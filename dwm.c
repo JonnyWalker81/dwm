@@ -59,7 +59,8 @@
 
 /* enums */
 enum { CurNormal, CurResize, CurMove, CurLast }; /* cursor */
-enum { SchemeNorm, SchemeSel }; /* color schemes */
+enum { SchemeNorm, SchemeSel, SchemeTitle, SchemeTag, SchemeTag1,
+       SchemeTag2, SchemeTag3, SchemeTag4, SchemeTag5, SchemeLayout }; /* color schemes */
 enum { NetSupported, NetWMName, NetWMState, NetWMCheck,
        NetWMFullscreen, NetActiveWindow, NetWMWindowType,
        NetWMWindowTypeDialog, NetClientList, NetLast }; /* EWMH atoms */
@@ -444,19 +445,31 @@ buttonpress(XEvent *e)
 		focus(NULL);
 	}
 	if (ev->window == selmon->barwin) {
+		unsigned int occ = 0;
+		Client *tc;
+		int barw = selmon->ww - 2 * horizpad;
+		for (tc = selmon->clients; tc; tc = tc->next)
+			occ |= tc->tags;
 		i = x = 0;
-		do
+		/* match hidden-vacant-tags logic from drawbar: skip tags with no windows and not selected */
+		for (i = 0; i < LENGTH(tags); i++) {
+			if (!(occ & 1 << i) && !(selmon->tagset[selmon->seltags] & 1 << i))
+				continue;
 			x += TEXTW(tags[i]);
-		while (ev->x >= x && ++i < LENGTH(tags));
-		if (i < LENGTH(tags)) {
-			click = ClkTagBar;
-			arg.ui = 1 << i;
-		} else if (ev->x < x + TEXTW(selmon->ltsymbol))
-			click = ClkLtSymbol;
-		else if (ev->x > selmon->ww - (int)TEXTW(stext))
-			click = ClkStatusText;
-		else
-			click = ClkWinTitle;
+			if (ev->x < x) {
+				click = ClkTagBar;
+				arg.ui = 1 << i;
+				break;
+			}
+		}
+		if (click != ClkTagBar) {
+			if (ev->x < x + TEXTW(selmon->ltsymbol))
+				click = ClkLtSymbol;
+			else if (ev->x > barw - (int)TEXTW(stext))
+				click = ClkStatusText;
+			else
+				click = ClkWinTitle;
+		}
 	} else if ((c = wintoclient(ev->window))) {
 		focus(c);
 		restack(selmon);
@@ -605,7 +618,7 @@ configurenotify(XEvent *e)
 				for (c = m->clients; c; c = c->next)
 					if (c->isfullscreen)
 						resizeclient(c, m->mx, m->my, m->mw, m->mh);
-				XMoveResizeWindow(dpy, m->barwin, m->wx, m->by, m->ww, bh);
+				XMoveResizeWindow(dpy, m->barwin, m->wx + horizpad, m->by, m->ww - 2 * horizpad, bh);
 			}
 			focus(NULL);
 			arrange(NULL);
@@ -873,10 +886,15 @@ void
 drawbar(Monitor *m)
 {
 	int x, w, tw = 0;
+	int barw = m->ww - 2 * horizpad; /* actual bar window width */
 	int boxs = drw->fonts->h / 9;
 	int boxw = drw->fonts->h / 6 + 2;
 	unsigned int i, occ = 0, urg = 0;
 	Client *c;
+
+	/* chadwm-style: map tag index to per-tag color scheme */
+	int tagschemes[] = { SchemeTag1, SchemeTag2, SchemeTag3, SchemeTag4, SchemeTag5,
+	                     SchemeTag1, SchemeTag2, SchemeTag3, SchemeTag4 };
 
 	if (!m->showbar)
 		return;
@@ -886,10 +904,10 @@ drawbar(Monitor *m)
 		drw_setscheme(drw, scheme[SchemeNorm]);
 		if (status2d_hasescapes(stext)) {
 			tw = status2dtextwidth(stext) + 2; /* 2px right padding */
-			drawstatus2d(m->ww - tw, tw);
+			drawstatus2d(barw - tw, tw);
 		} else {
 			tw = TEXTW(stext) - lrpad + 2; /* 2px right padding */
-			drw_text(drw, m->ww - tw, 0, tw, bh, 0, stext, 0);
+			drw_text(drw, barw - tw, 0, tw, bh, 0, stext, 0);
 		}
 	}
 
@@ -900,22 +918,47 @@ drawbar(Monitor *m)
 	}
 	x = 0;
 	for (i = 0; i < LENGTH(tags); i++) {
+		/* chadwm-style: hide vacant tags (no windows, not selected) */
+		if (!(occ & 1 << i) && !(m->tagset[m->seltags] & 1 << i))
+			continue;
+
 		w = TEXTW(tags[i]);
-		drw_setscheme(drw, scheme[m->tagset[m->seltags] & 1 << i ? SchemeSel : SchemeNorm]);
+
+		/* chadwm-style: use per-tag color scheme for occupied/selected tags */
+		if (m->tagset[m->seltags] & 1 << i) {
+			/* selected tag: use its unique color */
+			drw_setscheme(drw, scheme[tagschemes[i]]);
+		} else if (occ & 1 << i) {
+			/* occupied but not selected: use dimmed tag scheme */
+			drw_setscheme(drw, scheme[SchemeTag]);
+		} else {
+			drw_setscheme(drw, scheme[SchemeNorm]);
+		}
+
 		drw_text(drw, x, 0, w, bh, lrpad / 2, tags[i], urg & 1 << i);
-		if (occ & 1 << i)
+
+		/* chadwm-style: draw underline indicator for selected tags */
+		if (m->tagset[m->seltags] & 1 << i) {
+			drw_rect(drw, x + 2, bh - 3, w - 4, 2, 1, 0);
+		}
+
+		/* occupied indicator: small dot for tags with windows (not selected) */
+		if (occ & 1 << i && !(m->tagset[m->seltags] & 1 << i))
 			drw_rect(drw, x + boxs, boxs, boxw, boxw,
 				m == selmon && selmon->sel && selmon->sel->tags & 1 << i,
 				urg & 1 << i);
 		x += w;
 	}
+
+	/* layout symbol with its own color scheme */
 	w = TEXTW(m->ltsymbol);
-	drw_setscheme(drw, scheme[SchemeNorm]);
+	drw_setscheme(drw, scheme[SchemeLayout]);
 	x = drw_text(drw, x, 0, w, bh, lrpad / 2, m->ltsymbol, 0);
 
-	if ((w = m->ww - tw - x) > bh) {
+	/* window title area */
+	if ((w = barw - tw - x) > bh) {
 		if (m->sel) {
-			drw_setscheme(drw, scheme[m == selmon ? SchemeSel : SchemeNorm]);
+			drw_setscheme(drw, scheme[m == selmon ? SchemeTitle : SchemeNorm]);
 			drw_text(drw, x, 0, w, bh, lrpad / 2, m->sel->name, 0);
 			if (m->sel->isfloating)
 				drw_rect(drw, x + boxs, boxs, boxw, boxw, m->sel->isfixed, 0);
@@ -924,7 +967,7 @@ drawbar(Monitor *m)
 			drw_rect(drw, x, 0, w, bh, 1, 1);
 		}
 	}
-	drw_map(drw, m->barwin, 0, 0, m->ww, bh);
+	drw_map(drw, m->barwin, 0, 0, barw, bh);
 }
 
 void
@@ -1845,7 +1888,7 @@ setup(void)
 	if (!drw_fontset_create(drw, fonts, LENGTH(fonts)))
 		die("no fonts could be loaded.");
 	lrpad = drw->fonts->h;
-	bh = drw->fonts->h + 2;
+	bh = drw->fonts->h + barpadding;
 	updategeom();
 	/* init atoms */
 	utf8string = XInternAtom(dpy, "UTF8_STRING", False);
@@ -2120,7 +2163,7 @@ togglebar(const Arg *arg)
 {
 	selmon->showbar = !selmon->showbar;
 	updatebarpos(selmon);
-	XMoveResizeWindow(dpy, selmon->barwin, selmon->wx, selmon->by, selmon->ww, bh);
+	XMoveResizeWindow(dpy, selmon->barwin, selmon->wx + horizpad, selmon->by, selmon->ww - 2 * horizpad, bh);
 	arrange(selmon);
 }
 
@@ -2245,7 +2288,7 @@ updatebars(void)
 	for (m = mons; m; m = m->next) {
 		if (m->barwin)
 			continue;
-		m->barwin = XCreateWindow(dpy, root, m->wx, m->by, m->ww, bh, 0, DefaultDepth(dpy, screen),
+		m->barwin = XCreateWindow(dpy, root, m->wx + horizpad, m->by, m->ww - 2 * horizpad, bh, 0, DefaultDepth(dpy, screen),
 				CopyFromParent, DefaultVisual(dpy, screen),
 				CWOverrideRedirect|CWBackPixmap|CWEventMask, &wa);
 		XDefineCursor(dpy, m->barwin, cursor[CurNormal]->cursor);
@@ -2260,11 +2303,11 @@ updatebarpos(Monitor *m)
 	m->wy = m->my;
 	m->wh = m->mh;
 	if (m->showbar) {
-		m->wh -= bh;
-		m->by = m->topbar ? m->wy : m->wy + m->wh;
-		m->wy = m->topbar ? m->wy + bh : m->wy;
+		m->wh -= bh + vertpad * 2;
+		m->by = m->topbar ? m->wy + vertpad : m->wy + m->wh;
+		m->wy = m->topbar ? m->wy + bh + vertpad * 2 : m->wy;
 	} else
-		m->by = -bh;
+		m->by = -bh - vertpad;
 }
 
 void

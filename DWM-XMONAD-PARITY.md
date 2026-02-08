@@ -276,13 +276,55 @@ users/cipher/home-manager.nix         # Deploys dwm/ files to ~/.local/share/dwm
 users/jrothberg/home-manager.nix      # Same for jrothberg user
 ```
 
+## chadwm-Style Visual Enhancements
+
+Inspired by [siduck/chadwm](https://github.com/siduck/chadwm), the following visual improvements were ported while keeping all existing functionality intact:
+
+### Bar Enhancements
+- **Floating bar**: Horizontal and vertical padding (`horizpad=8`, `vertpad=8`) creates a floating bar that doesn't touch screen edges
+- **Increased bar height**: `barpadding=10` adds internal padding for a taller, more comfortable bar
+- **Colorful tags**: Each tag has its own unique color (blue, red, orange, green, pink) cycling across all 9 tags
+- **Underline indicators**: Active/selected tags show a 2px underline beneath them
+- **Hide vacant tags**: Tags with no windows and not currently selected are hidden, keeping the bar clean
+- **Dedicated color schemes**: Separate colors for title area, layout symbol, active tags, inactive tags
+- **Nerd Font icons**: Tags use Nerd Font icons (, , , , ) instead of text labels
+
+### Color Scheme (Tokyo Night / Omarchy)
+| Scheme | Foreground | Purpose |
+|--------|-----------|---------|
+| SchemeNorm | `#a9b1d6` (soft gray) | Normal windows, unfocused elements |
+| SchemeSel | `#B4F9F8` (bright cyan) | Selected/focused windows |
+| SchemeTitle | `#B4F9F8` (cyan) | Window title text |
+| SchemeTag | `#3e4554` (dimmed) | Occupied but unselected tags |
+| SchemeTag1 | `#7aa2f7` (blue) | Tag 1, 6 |
+| SchemeTag2 | `#f7768e` (red) | Tag 2, 7 |
+| SchemeTag3 | `#ff9e64` (orange) | Tag 3, 8 |
+| SchemeTag4 | `#9ece6a` (green) | Tag 4, 9 |
+| SchemeTag5 | `#bb9af7` (pink) | Tag 5 |
+| SchemeLayout | `#e0af68` (yellow) | Layout symbol |
+
+### Status Bar
+- Nerd Font icons for each section (, , , , , )
+- Color-coded segments via status2d escape codes
+- Dynamic CPU/memory colors (green -> yellow -> red based on usage)
+- Tokyo Night color palette matching the bar theme
+
+### Picom Integration
+- DWM bar (`class_g = 'dwm'`) excluded from blur, shadows, rounded corners, and opacity rules
+- Full opacity on the bar for crisp text rendering
+
+### Source Changes (dwm.c)
+- Extended `enum` with 8 new color schemes: `SchemeTitle`, `SchemeTag`, `SchemeTag1-5`, `SchemeLayout`
+- Rewrote `drawbar()` for per-tag colors, underlines, vacant tag hiding
+- Updated `buttonpress()` to handle hidden vacant tags in click detection
+- Added `horizpad`, `vertpad`, `barpadding` variables for floating bar geometry
+- Updated `updatebarpos()`, `updatebars()`, `togglebar()`, `configurenotify()` for bar padding
+
 ## Potential Future Work
 
-- **Runtime testing**: Log into DWM session, verify everything works end-to-end
-- **Status bar polish**: Consider `dwmblocks` or `slstatus` for click-to-expand, colored segments, etc. The current `xsetroot` approach is plain text only (no colors in DWM's built-in bar without the `status2d` patch)
-- **Status2d patch**: Would allow colored status bar segments similar to xmobar's colored boxes
 - **Systray patch**: Add system tray to DWM bar (xmobar has `trayer` integration)
 - **Per-tag layouts**: DWM uses a single layout list cycled via mod+Space; XMonad remembers layout per-workspace
 - **XMonad layouts not yet ported**: `threeRow`, `oneBig`, `space` (XMonad has 9 layouts vs DWM's 5)
-- **Picom exclusion rules**: XMonad's picom config excludes xmobar from blur/shadows; DWM bar may need similar rules added to `~/.config/picom/picom.conf` or `users/common.nix`
 - **Restart-in-place**: DWM doesn't have XMonad's `mod+q` recompile-and-restart; consider adding a `SIGHUP` handler or the `restart` patch
+- **Tag preview**: Hover over tags to see workspace thumbnail (requires imlib2)
+- **Window icons (winicon)**: Show application icons in the bar title area (requires imlib2)

@@ -9,15 +9,15 @@ static const int topbar             = 1;        /* 0 means bottom bar */
 
 /* chadwm-style bar padding: creates a floating bar effect */
 static const int horizpad           = 8;        /* horizontal padding (gap between bar and screen edges) */
-static const int vertpad            = 8;        /* vertical padding (gap between bar and top of screen) */
+static const int vertpad            = 4;        /* vertical padding (gap between bar and top of screen) */
 static const int barpadding         = 10;       /* internal bar height padding (added to font height) */
 
 /* fonts: primary UI font + Nerd Font for icons */
 static const char *fonts[]          = { "Ubuntu:weight=bold:pixelsize=13:antialias=true:hinting=true",
                                         "JetBrainsMono Nerd Font:pixelsize=15:antialias=true:hinting=true",
-                                        "Mononoki:weight=bold:pixelsize=13:antialias=true:hinting=true",
-                                        "Font Awesome 6 Free Solid:pixelsize=13:antialias=true:hinting=true",
-                                        "Font Awesome 6 Brands:pixelsize=13:antialias=true:hinting=true" };
+                                        "Mononoki Nerd Font:weight=bold:pixelsize=13:antialias=true:hinting=true",
+                                        "Font Awesome 5 Free Solid:pixelsize=13:antialias=true:hinting=true",
+                                        "Font Awesome 5 Brands:pixelsize=13:antialias=true:hinting=true" };
 static const char dmenufont[]       = "Ubuntu:weight=bold:pixelsize=13:antialias=true:hinting=true";
 
 /* --- Tokyo Night / Omarchy color palette --- */
@@ -55,7 +55,7 @@ static const char *colors[][3]     = {
 };
 
 /* tagging - matching XMonad workspaces with Nerd Font icons */
-static const char *tags[] = { " ", " ", " ", " ", " ", "6", "7", "8", "9" };
+static const char *tags[] = { "  ", "  ", "  ", "  ", "  ", "6", "7", "8", "9" };
 
 static const Rule rules[] = {
 	/* xprop(1):

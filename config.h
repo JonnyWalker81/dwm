@@ -4,8 +4,12 @@
 static const unsigned int borderpx  = 2;        /* border pixel of windows (XMonad: myBorderWidth = 2) */
 static const unsigned int snap      = 32;       /* snap pixel */
 static const int gappx              = 4;        /* gap pixel between windows */
-static const int showbar            = 1;        /* 0 means no bar */
+static const int showbar            = 0;        /* 0 = DWM's own bar off; polybar is the bar */
 static const int topbar             = 1;        /* 0 means bottom bar */
+
+/* External top bar (polybar): reserve this many px at the top of each monitor so
+ * tiled windows don't render underneath it. Keep in sync with polybar's height. */
+static const int altbarpx           = 36;
 
 /* chadwm-style bar padding: creates a floating bar effect */
 static const int horizpad           = 8;        /* horizontal padding (gap between bar and screen edges) */

@@ -63,7 +63,9 @@ enum { SchemeNorm, SchemeSel, SchemeTitle, SchemeTag, SchemeTag1,
        SchemeTag2, SchemeTag3, SchemeTag4, SchemeTag5, SchemeLayout }; /* color schemes */
 enum { NetSupported, NetWMName, NetWMState, NetWMCheck,
        NetWMFullscreen, NetActiveWindow, NetWMWindowType,
-       NetWMWindowTypeDialog, NetClientList, NetLast }; /* EWMH atoms */
+       NetWMWindowTypeDialog, NetClientList,
+       NetNumberOfDesktops, NetCurrentDesktop, NetDesktopNames,
+       NetLast }; /* EWMH atoms */
 enum { WMProtocols, WMDelete, WMState, WMTakeFocus, WMLast }; /* default atoms */
 enum { ClkTagBar, ClkLtSymbol, ClkStatusText, ClkWinTitle,
        ClkClientWin, ClkRootWin, ClkLast }; /* clicks */
@@ -237,6 +239,10 @@ static void updatestatus(void);
 static void updatetitle(Client *c);
 static void updatewindowtype(Client *c);
 static void updatewmhints(Client *c);
+static int getcurrentdesktop(void);
+static void setnumdesktops(void);
+static void setcurrentdesktop(void);
+static void setdesktopnames(void);
 static void view(const Arg *arg);
 static Client *wintoclient(Window w);
 static Monitor *wintomon(Window w);
@@ -581,6 +587,13 @@ clientmessage(XEvent *e)
 	XClientMessageEvent *cme = &e->xclient;
 	Client *c = wintoclient(cme->window);
 
+	/* external bar (polybar) click-to-switch: _NET_CURRENT_DESKTOP arrives on root */
+	if (cme->message_type == netatom[NetCurrentDesktop]) {
+		long d = cme->data.l[0];
+		if (d >= 0 && d < LENGTH(tags))
+			view(&(Arg){.ui = 1u << d});
+		return;
+	}
 	if (!c)
 		return;
 	if (cme->message_type == netatom[NetWMState]) {
@@ -1936,6 +1949,9 @@ setup(void)
 	netatom[NetWMWindowType] = XInternAtom(dpy, "_NET_WM_WINDOW_TYPE", False);
 	netatom[NetWMWindowTypeDialog] = XInternAtom(dpy, "_NET_WM_WINDOW_TYPE_DIALOG", False);
 	netatom[NetClientList] = XInternAtom(dpy, "_NET_CLIENT_LIST", False);
+	netatom[NetNumberOfDesktops] = XInternAtom(dpy, "_NET_NUMBER_OF_DESKTOPS", False);
+	netatom[NetCurrentDesktop] = XInternAtom(dpy, "_NET_CURRENT_DESKTOP", False);
+	netatom[NetDesktopNames] = XInternAtom(dpy, "_NET_DESKTOP_NAMES", False);
 	/* init cursors */
 	cursor[CurNormal] = drw_cur_create(drw, XC_left_ptr);
 	cursor[CurResize] = drw_cur_create(drw, XC_sizing);
@@ -1959,6 +1975,11 @@ setup(void)
 	XChangeProperty(dpy, root, netatom[NetSupported], XA_ATOM, 32,
 		PropModeReplace, (unsigned char *) netatom, NetLast);
 	XDeleteProperty(dpy, root, netatom[NetClientList]);
+	/* EWMH desktops: advertise tags as virtual desktops so an external bar
+	 * (polybar) can display the workspace list and switch via click */
+	setnumdesktops();
+	setdesktopnames();
+	setcurrentdesktop();
 	/* select events */
 	wa.cursor = cursor[CurNormal]->cursor;
 	wa.event_mask = SubstructureRedirectMask|SubstructureNotifyMask
@@ -2364,6 +2385,54 @@ updatebarpos(Monitor *m)
 		m->wy = m->topbar ? m->wy + bh + vertpad * 2 : m->wy;
 	} else
 		m->by = -bh - vertpad;
+	/* reserve space at the top of the monitor for an external bar (polybar) so
+	 * tiled windows do not render underneath it (this fork honours no struts) */
+	if (altbarpx > 0) {
+		m->wy += altbarpx;
+		m->wh -= altbarpx;
+	}
+}
+
+int
+getcurrentdesktop(void)
+{
+	unsigned int t = selmon ? selmon->tagset[selmon->seltags] : 1;
+	int i;
+
+	for (i = 0; i < LENGTH(tags); i++)
+		if (t & (1 << i))
+			return i;
+	return 0;
+}
+
+void
+setnumdesktops(void)
+{
+	long data[] = { LENGTH(tags) };
+
+	XChangeProperty(dpy, root, netatom[NetNumberOfDesktops], XA_CARDINAL, 32,
+		PropModeReplace, (unsigned char *)data, 1);
+}
+
+void
+setcurrentdesktop(void)
+{
+	long data[] = { getcurrentdesktop() };
+
+	XChangeProperty(dpy, root, netatom[NetCurrentDesktop], XA_CARDINAL, 32,
+		PropModeReplace, (unsigned char *)data, 1);
+}
+
+void
+setdesktopnames(void)
+{
+	XTextProperty text;
+	char **names = (char **)tags;
+
+	if (Xutf8TextListToTextProperty(dpy, names, LENGTH(tags), XUTF8StringStyle, &text) >= Success) {
+		XSetTextProperty(dpy, root, &text, netatom[NetDesktopNames]);
+		XFree(text.value);
+	}
 }
 
 void
@@ -2603,6 +2672,7 @@ view(const Arg *arg)
 
 	focus(NULL);
 	arrange(selmon);
+	setcurrentdesktop();
 }
 
 Client *

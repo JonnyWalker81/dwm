@@ -194,6 +194,8 @@ static const Key keys[] = {
 	/* --- Quit --- */
 	/* mod+Shift+q: Quit DWM (like XMonad quit) */
 	{ MODKEY|ShiftMask,             XK_q,      quit,           {0} },
+	/* mod+Shift+r: Restart DWM in place (reload the binary, keep all windows) */
+	{ MODKEY|ShiftMask,             XK_r,      quit,           {.i = 1} },
 
 	/* --- Workspace switching (mod+[1..9]) and moving (mod+Shift+[1..9]) --- */
 	TAGKEYS(                        XK_1,                      0)

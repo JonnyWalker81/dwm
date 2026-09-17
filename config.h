@@ -121,6 +121,10 @@ static const Key keys[] = {
 	{ MODKEY,                       XK_r,      spawn,          SHCMD("rofi -modi \"clipboard:greenclip print\" -show clipboard -run-command '{cmd}'") },
 	/* mod+Shift+p: Launch gmrun */
 	{ MODKEY|ShiftMask,             XK_p,      spawn,          SHCMD("gmrun") },
+	/* mod+a: herdr session picker (launches, or reuses an open window) */
+	{ MODKEY,                       XK_a,      spawn,          SHCMD("/home/cipher/nixos-config/scripts/herdr-dwm.sh session") },
+	/* mod+Shift+a: jump to the herdr agent that is blocked or done */
+	{ MODKEY|ShiftMask,             XK_a,      spawn,          SHCMD("/home/cipher/nixos-config/scripts/herdr-dwm.sh attention") },
 
 	/* --- Window management (matching XMonad keybindings) --- */
 	/* mod+Shift+c: Kill focused window */

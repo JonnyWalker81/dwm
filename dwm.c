@@ -62,7 +62,7 @@ enum { CurNormal, CurResize, CurMove, CurLast }; /* cursor */
 enum { SchemeNorm, SchemeSel, SchemeTitle, SchemeTag, SchemeTag1,
        SchemeTag2, SchemeTag3, SchemeTag4, SchemeTag5, SchemeLayout }; /* color schemes */
 enum { NetSupported, NetWMName, NetWMState, NetWMCheck,
-       NetWMFullscreen, NetActiveWindow, NetWMWindowType,
+       NetWMFullscreen, NetWMHidden, NetActiveWindow, NetWMWindowType,
        NetWMWindowTypeDialog, NetClientList,
        NetNumberOfDesktops, NetCurrentDesktop, NetDesktopNames,
        NetLast }; /* EWMH atoms */
@@ -96,7 +96,7 @@ struct Client {
 	int basew, baseh, incw, inch, maxw, maxh, minw, minh, hintsvalid;
 	int bw, oldbw;
 	unsigned int tags;
-	int isfixed, isfloating, isurgent, neverfocus, oldstate, isfullscreen;
+	int isfixed, isfloating, isurgent, neverfocus, oldstate, isfullscreen, ishidden;
 	Client *next;
 	Client *snext;
 	Monitor *mon;
@@ -210,6 +210,7 @@ static void sendmon(Client *c, Monitor *m);
 static void setclientstate(Client *c, long state);
 static void setfocus(Client *c);
 static void setfullscreen(Client *c, int fullscreen);
+static void sethidden(Client *c, int hidden);
 static void setlayout(const Arg *arg);
 static void setmfact(const Arg *arg);
 static void setup(void);
@@ -238,6 +239,7 @@ static void updatesizehints(Client *c);
 static void updatestatus(void);
 static void updatetitle(Client *c);
 static void updatewindowtype(Client *c);
+static void updatewmstate(Client *c);
 static void updatewmhints(Client *c);
 static int getcurrentdesktop(void);
 static void setnumdesktops(void);
@@ -1855,9 +1857,8 @@ void
 setfullscreen(Client *c, int fullscreen)
 {
 	if (fullscreen && !c->isfullscreen) {
-		XChangeProperty(dpy, c->win, netatom[NetWMState], XA_ATOM, 32,
-			PropModeReplace, (unsigned char*)&netatom[NetWMFullscreen], 1);
 		c->isfullscreen = 1;
+		updatewmstate(c);
 		c->oldstate = c->isfloating;
 		c->oldbw = c->bw;
 		c->bw = 0;
@@ -1865,9 +1866,8 @@ setfullscreen(Client *c, int fullscreen)
 		resizeclient(c, c->mon->mx, c->mon->my, c->mon->mw, c->mon->mh);
 		XRaiseWindow(dpy, c->win);
 	} else if (!fullscreen && c->isfullscreen){
-		XChangeProperty(dpy, c->win, netatom[NetWMState], XA_ATOM, 32,
-			PropModeReplace, (unsigned char*)0, 0);
 		c->isfullscreen = 0;
+		updatewmstate(c);
 		c->isfloating = c->oldstate;
 		c->bw = c->oldbw;
 		c->x = c->oldx;
@@ -1877,6 +1877,22 @@ setfullscreen(Client *c, int fullscreen)
 		resizeclient(c, c->x, c->y, c->w, c->h);
 		arrange(c->mon);
 	}
+}
+
+/* Advertise _NET_WM_STATE_HIDDEN for clients parked off-screen by showhide().
+ * GTK4/X11 turns that hint into GDK_TOPLEVEL_STATE_SUSPENDED, which lets
+ * toolkit clients (ghostty) stop producing frames for windows nobody can see.
+ * showhide() runs from every arrange(), so only write on an actual transition:
+ * an unconditional XChangeProperty would fire a PropertyNotify at every hidden
+ * client on every focus change, and each GTK client answers that with a
+ * synchronous XGetWindowProperty round-trip. */
+void
+sethidden(Client *c, int hidden)
+{
+	if (c->ishidden == hidden)
+		return;
+	c->ishidden = hidden;
+	updatewmstate(c);
 }
 
 void
@@ -1949,6 +1965,7 @@ setup(void)
 	netatom[NetWMState] = XInternAtom(dpy, "_NET_WM_STATE", False);
 	netatom[NetWMCheck] = XInternAtom(dpy, "_NET_SUPPORTING_WM_CHECK", False);
 	netatom[NetWMFullscreen] = XInternAtom(dpy, "_NET_WM_STATE_FULLSCREEN", False);
+	netatom[NetWMHidden] = XInternAtom(dpy, "_NET_WM_STATE_HIDDEN", False);
 	netatom[NetWMWindowType] = XInternAtom(dpy, "_NET_WM_WINDOW_TYPE", False);
 	netatom[NetWMWindowTypeDialog] = XInternAtom(dpy, "_NET_WM_WINDOW_TYPE_DIALOG", False);
 	netatom[NetClientList] = XInternAtom(dpy, "_NET_CLIENT_LIST", False);
@@ -2015,6 +2032,7 @@ showhide(Client *c)
 	if (ISVISIBLE(c)) {
 		/* show clients top down */
 		XMoveWindow(dpy, c->win, c->x, c->y);
+		sethidden(c, 0);
 		if ((!c->mon->lt[c->mon->sellt]->arrange || c->isfloating) && !c->isfullscreen)
 			resize(c, c->x, c->y, c->w, c->h, 0);
 		showhide(c->snext);
@@ -2022,6 +2040,7 @@ showhide(Client *c)
 		/* hide clients bottom up */
 		showhide(c->snext);
 		XMoveWindow(dpy, c->win, WIDTH(c) * -2, c->y);
+		sethidden(c, 1);
 	}
 }
 
@@ -2617,6 +2636,25 @@ updatewindowtype(Client *c)
 		setfullscreen(c, 1);
 	if (wtype == netatom[NetWMWindowTypeDialog])
 		c->isfloating = 1;
+}
+
+/* Single writer for _NET_WM_STATE, since fullscreen and hidden can both be set
+ * on one client and PropModeReplace overwrites the whole property.
+ * _NET_WM_STATE_FULLSCREEN must stay first: updatewindowtype() reads only the
+ * first atom via getatomprop(). */
+void
+updatewmstate(Client *c)
+{
+	Atom states[2];
+	int n = 0;
+
+	if (c->isfullscreen)
+		states[n++] = netatom[NetWMFullscreen];
+	if (c->ishidden)
+		states[n++] = netatom[NetWMHidden];
+
+	XChangeProperty(dpy, c->win, netatom[NetWMState], XA_ATOM, 32,
+		PropModeReplace, (unsigned char *)states, n);
 }
 
 void
